@@ -690,7 +690,8 @@ of how that would work.
 .TP
 .BI ioscheduler \fR=\fPstr
 Attempt to switch the device hosting the file to the specified I/O scheduler
-before running.
+before running. If the file is a pipe, a character device file or if device
+hosting the file could not be determined, this option is ignored.
 .TP
 .BI create_serialize \fR=\fPbool
 If true, serialize the file creation for the jobs. This may be handy to
@@ -1847,6 +1848,11 @@ Simply do stat() and do no I/O to the file. You need to set 'filesize'
 and 'nrfiles', so that files will be created.
 This engine is to measure file lookup and meta data access.
 .TP
+.B filedelete
+Simply delete files by unlink() and do no I/O to the file. You need to set 'filesize'
+and 'nrfiles', so that files will be created.
+This engine is to measure file delete.
+.TP
 .B libpmem
 Read and write using mmap I/O to a file on a filesystem
 mounted with DAX on a persistent memory device through the PMDK
@@ -2086,6 +2092,11 @@ by default.
 .BI (rbd,rados)busy_poll \fR=\fPbool
 Poll store instead of waiting for completion. Usually this provides better
 throughput at cost of higher(up to 100%) CPU utilization.
+.TP
+.BI (rados)touch_objects \fR=\fPbool
+During initialization, touch (create if do not exist) all objects (files).
+Touching all objects affects ceph caches and likely impacts test results.
+Enabled by default.
 .TP
 .BI (http)http_host \fR=\fPstr
 Hostname to connect to. For S3, this could be the bucket name. Default
