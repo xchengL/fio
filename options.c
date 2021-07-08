@@ -2026,6 +2026,11 @@ struct fio_option fio_options[FIO_MAX_OPTS] = {
 			    .help = "DAOS File System (dfs) IO engine",
 			  },
 #endif
+#ifdef CONFIG_NFS
+			  { .ival = "nfs",
+			    .help = "NFS IO engine",
+			  },
+#endif
 		},
 	},
 	{
@@ -3484,6 +3489,16 @@ struct fio_option fio_options[FIO_MAX_OPTS] = {
 		.maxval	= ZBD_MAX_OPEN_ZONES,
 		.help	= "Limit on the number of simultaneously opened sequential write zones with zonemode=zbd by one thread/process",
 		.def	= "0",
+		.category = FIO_OPT_C_IO,
+		.group	= FIO_OPT_G_INVALID,
+	},
+	{
+		.name	= "ignore_zone_limits",
+		.lname	= "Ignore zone resource limits",
+		.type	= FIO_OPT_BOOL,
+		.off1	= offsetof(struct thread_options, ignore_zone_limits),
+		.def	= "0",
+		.help	= "Ignore the zone resource limits (max open/active zones) reported by the device",
 		.category = FIO_OPT_C_IO,
 		.group	= FIO_OPT_G_INVALID,
 	},

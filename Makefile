@@ -40,6 +40,11 @@ ifdef CONFIG_PDB
   LDFLAGS += -fuse-ld=lld $(LINK_PDBFILE)
 endif
 
+# If clang, do not use builtin stpcpy as it breaks the build
+ifeq ($(CC),clang)
+  FIO_CFLAGS += -fno-builtin-stpcpy
+endif
+
 ifdef CONFIG_GFIO
   PROGS += gfio
 endif
@@ -77,6 +82,12 @@ ifdef CONFIG_LIBNBD
   nbd_LIBS = $(LIBNBD_LIBS)
   nbd_CFLAGS = $(LIBNBD_CFLAGS)
   ENGINES += nbd
+endif
+
+ifdef CONFIG_LIBNFS
+  CFLAGS += $(LIBNFS_CFLAGS)
+  LIBS += $(LIBNFS_LIBS)
+  SOURCE += engines/nfs.c
 endif
 
 ifdef CONFIG_64BIT
@@ -282,7 +293,7 @@ else # !CONFIG_DYNAMIC_ENGINES
 define engine_template =
 SOURCE += $$($(1)_SRCS)
 LIBS += $$($(1)_LIBS)
-CFLAGS += $$($(1)_CFLAGS)
+override CFLAGS += $$($(1)_CFLAGS)
 endef
 endif
 
