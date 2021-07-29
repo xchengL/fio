@@ -1509,6 +1509,48 @@ all \-\- this option only controls the distribution of unique buffers. Setting
 this option will also enable \fBrefill_buffers\fR to prevent every buffer
 being identical.
 .TP
+.BI dedupe_mode \fR=\fPstr
+If \fBdedupe_percentage\fR is given, then this option controls how fio
+generates the dedupe buffers.
+.RS
+.RS
+.TP
+.B repeat
+.P
+.RS
+Generate dedupe buffers by repeating previous writes
+.RE
+.TP
+.B working_set
+.P
+.RS
+Generate dedupe buffers from working set
+.RE
+.RE
+.P
+\fBrepeat\fR is the default option for fio. Dedupe buffers are generated
+by repeating previous unique write.
+
+\fBworking_set\fR is a more realistic workload.
+With \fBworking_set\fR, \fBdedupe_working_set_percentage\fR should be provided.
+Given that, fio will use the initial unique write buffers as its working set.
+Upon deciding to dedupe, fio will randomly choose a buffer from the working set.
+Note that by using \fBworking_set\fR the dedupe percentage will converge
+to the desired over time while \fBrepeat\fR maintains the desired percentage
+throughout the job.
+.RE
+.RE
+.TP
+.BI dedupe_working_set_percentage \fR=\fPint
+If \fBdedupe_mode\fR is set to \fBworking_set\fR, then this controls
+the percentage of size of the file or device used as the buffers
+fio will choose to generate the dedupe buffers from
+.P
+.RS
+Note that \fBsize\fR needs to be explicitly provided and only 1 file
+per job is supported
+.RE
+.TP
 .BI invalidate \fR=\fPbool
 Invalidate the buffer/page cache parts of the files to be used prior to
 starting I/O if the platform and file type support it. Defaults to true.
@@ -1912,6 +1954,9 @@ I/O engine supporting asynchronous read and write operations to
 NFS filesystems from userspace via libnfs. This is useful for
 achieving higher concurrency and thus throughput than is possible
 via kernel NFS.
+.TP
+.B exec
+Execute 3rd party tools. Could be used to perform monitoring during jobs runtime.
 .SS "I/O engine specific parameters"
 In addition, there are some parameters which are only valid when a specific
 \fBioengine\fR is in use. These are used identically to normal parameters,
@@ -2298,6 +2343,31 @@ Use DAOS container's object class by default.
 .BI (nfs)nfs_url
 URL in libnfs format, eg nfs://<server|ipv4|ipv6>/path[?arg=val[&arg=val]*]
 Refer to the libnfs README for more details.
+.TP
+.BI (exec)program\fR=\fPstr
+Specify the program to execute.
+Note the program will receive a SIGTERM when the job is reaching the time limit.
+A SIGKILL is sent once the job is over. The delay between the two signals is defined by \fBgrace_time\fR option.
+.TP
+.BI (exec)arguments\fR=\fPstr
+Specify arguments to pass to program.
+Some special variables can be expanded to pass fio's job details to the program :
+.RS
+.RS
+.TP
+.B %r
+replaced by the duration of the job in seconds
+.TP
+.BI %n
+replaced by the name of the job
+.RE
+.RE
+.TP
+.BI (exec)grace_time\fR=\fPint
+Defines the time between the SIGTERM and SIGKILL signals. Default is 1 second.
+.TP
+.BI (exec)std_redirect\fR=\fbool
+If set, stdout and stderr streams are redirected to files named from the job name. Default is true.
 .SS "I/O depth"
 .TP
 .BI iodepth \fR=\fPint

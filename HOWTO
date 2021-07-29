@@ -1705,6 +1705,36 @@ Buffers and memory
 	this option will also enable :option:`refill_buffers` to prevent every buffer
 	being identical.
 
+.. option:: dedupe_mode=str
+
+	If ``dedupe_percentage=<int>`` is given, then this option controls how fio
+	generates the dedupe buffers.
+
+		**repeat**
+			Generate dedupe buffers by repeating previous writes
+		**working_set**
+			Generate dedupe buffers from working set
+
+	``repeat`` is the default option for fio. Dedupe buffers are generated
+	by repeating previous unique write.
+
+	``working_set`` is a more realistic workload.
+	With ``working_set``, ``dedupe_working_set_percentage=<int>`` should be provided.
+	Given that, fio will use the initial unique write buffers as its working set.
+	Upon deciding to dedupe, fio will randomly choose a buffer from the working set.
+	Note that by using ``working_set`` the dedupe percentage will converge
+	to the desired over time while ``repeat`` maintains the desired percentage
+	throughout the job.
+
+.. option:: dedupe_working_set_percentage=int
+
+	If ``dedupe_mode=<str>`` is set to ``working_set``, then this controls
+	the percentage of size of the file or device used as the buffers
+	fio will choose to generate the dedupe buffers from
+
+	Note that size needs to be explicitly provided and only 1 file per
+	job is supported
+
 .. option:: invalidate=bool
 
 	Invalidate the buffer/page cache parts of the files to be used prior to
@@ -2108,6 +2138,9 @@ I/O engine
 			NFS filesystems from userspace via libnfs. This is useful for
 			achieving higher concurrency and thus throughput than is possible
 			via kernel NFS.
+
+		**exec**
+			Execute 3rd party tools. Could be used to perform monitoring during jobs runtime.
 
 I/O engine specific parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2535,6 +2568,28 @@ with the caveat that when used on the command line, they must come after the
 
 	URL in libnfs format, eg nfs://<server|ipv4|ipv6>/path[?arg=val[&arg=val]*]
 	Refer to the libnfs README for more details.
+
+.. option:: program=str : [exec]
+
+	Specify the program to execute.
+
+.. option:: arguments=str : [exec]
+
+	Specify arguments to pass to program.
+	Some special variables can be expanded to pass fio's job details to the program.
+
+	**%r**
+		Replaced by the duration of the job in seconds.
+	**%n**
+		Replaced by the name of the job.
+
+.. option:: grace_time=int : [exec]
+
+	Specify the time between the SIGTERM and SIGKILL signals. Default is 1 second.
+
+.. option:: std_redirect=boot : [exec]
+
+	If set, stdout and stderr streams are redirected to files named from the job name. Default is true.
 
 I/O depth
 ~~~~~~~~~
