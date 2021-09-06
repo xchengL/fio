@@ -117,7 +117,11 @@ static inline int fio_cpus_split(os_cpu_mask_t *mask, unsigned int cpu_index)
 extern int fio_cpus_split(os_cpu_mask_t *mask, unsigned int cpu);
 #endif
 
+#ifndef FIO_HAVE_IOPRIO_CLASS
+#define ioprio_value_is_class_rt(prio)	(false)
+#endif
 #ifndef FIO_HAVE_IOPRIO
+#define ioprio_value(prioclass, prio)	(0)
 #define ioprio_set(which, who, prioclass, prio)	(0)
 #endif
 
@@ -155,10 +159,6 @@ extern int fio_cpus_split(os_cpu_mask_t *mask, unsigned int cpu);
 
 #ifndef OS_RAND_MAX
 #define OS_RAND_MAX			RAND_MAX
-#endif
-
-#ifndef FIO_HAVE_RAWBIND
-#define fio_lookup_raw(dev, majdev, mindev)	1
 #endif
 
 #ifndef FIO_PREFERRED_ENGINE

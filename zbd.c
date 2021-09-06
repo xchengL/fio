@@ -375,12 +375,24 @@ static bool zbd_verify_bs(void)
 	int i, j, k;
 
 	for_each_td(td, i) {
+		if (td_trim(td) &&
+		    (td->o.min_bs[DDIR_TRIM] != td->o.max_bs[DDIR_TRIM] ||
+		     td->o.bssplit_nr[DDIR_TRIM])) {
+			log_info("bsrange and bssplit are not allowed for trim with zonemode=zbd\n");
+			return false;
+		}
 		for_each_file(td, f, j) {
 			uint64_t zone_size;
 
 			if (!f->zbd_info)
 				continue;
 			zone_size = f->zbd_info->zone_size;
+			if (td_trim(td) && td->o.bs[DDIR_TRIM] != zone_size) {
+				log_info("%s: trim block size %llu is not the zone size %llu\n",
+					 f->file_name, td->o.bs[DDIR_TRIM],
+					 (unsigned long long)zone_size);
+				return false;
+			}
 			for (k = 0; k < FIO_ARRAY_SIZE(td->o.bs); k++) {
 				if (td->o.verify != VERIFY_NONE &&
 				    zone_size % td->o.bs[k] != 0) {
@@ -1184,11 +1196,12 @@ out:
 	return res;
 }
 
-/* Anything goes as long as it is not a constant. */
+/* Return random zone index for one of the open zones. */
 static uint32_t pick_random_zone_idx(const struct fio_file *f,
 				     const struct io_u *io_u)
 {
-	return io_u->offset * f->zbd_info->num_open_zones / f->real_file_size;
+	return (io_u->offset - f->file_offset) * f->zbd_info->num_open_zones /
+		f->io_size;
 }
 
 /*
@@ -1413,18 +1426,16 @@ static struct fio_zone_info *zbd_replay_write_order(struct thread_data *td,
 }
 
 /*
- * Find another zone for which @io_u fits in the readable data in the zone.
- * Search in zones @zb + 1 .. @zl. For random workload, also search in zones
- * @zb - 1 .. @zf.
+ * Find another zone which has @min_bytes of readable data. Search in zones
+ * @zb + 1 .. @zl. For random workload, also search in zones @zb - 1 .. @zf.
  *
  * Either returns NULL or returns a zone pointer. When the zone has write
  * pointer, hold the mutex for the zone.
  */
 static struct fio_zone_info *
-zbd_find_zone(struct thread_data *td, struct io_u *io_u,
+zbd_find_zone(struct thread_data *td, struct io_u *io_u, uint32_t min_bytes,
 	      struct fio_zone_info *zb, struct fio_zone_info *zl)
 {
-	const uint32_t min_bs = td->o.min_bs[io_u->ddir];
 	struct fio_file *f = io_u->file;
 	struct fio_zone_info *z1, *z2;
 	const struct fio_zone_info *const zf = get_zone(f, f->min_zone);
@@ -1437,7 +1448,7 @@ zbd_find_zone(struct thread_data *td, struct io_u *io_u,
 		if (z1 < zl && z1->cond != ZBD_ZONE_COND_OFFLINE) {
 			if (z1->has_wp)
 				zone_lock(td, f, z1);
-			if (z1->start + min_bs <= z1->wp)
+			if (z1->start + min_bytes <= z1->wp)
 				return z1;
 			if (z1->has_wp)
 				zone_unlock(z1);
@@ -1448,14 +1459,14 @@ zbd_find_zone(struct thread_data *td, struct io_u *io_u,
 		    z2->cond != ZBD_ZONE_COND_OFFLINE) {
 			if (z2->has_wp)
 				zone_lock(td, f, z2);
-			if (z2->start + min_bs <= z2->wp)
+			if (z2->start + min_bytes <= z2->wp)
 				return z2;
 			if (z2->has_wp)
 				zone_unlock(z2);
 		}
 	}
-	dprint(FD_ZBD, "%s: adjusting random read offset failed\n",
-	       f->file_name);
+	dprint(FD_ZBD, "%s: no zone has %d bytes of readable data\n",
+	       f->file_name, min_bytes);
 	return NULL;
 }
 
@@ -1529,9 +1540,6 @@ static void zbd_queue_io(struct thread_data *td, struct io_u *io_u, int q,
 		}
 		pthread_mutex_unlock(&zbd_info->mutex);
 		z->wp = zone_end;
-		break;
-	case DDIR_TRIM:
-		assert(z->wp == z->start);
 		break;
 	default:
 		break;
@@ -1784,7 +1792,7 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 		    ((!td_random(td)) && (io_u->offset + min_bs > zb->wp))) {
 			zone_unlock(zb);
 			zl = get_zone(f, f->max_zone);
-			zb = zbd_find_zone(td, io_u, zb, zl);
+			zb = zbd_find_zone(td, io_u, min_bs, zb, zl);
 			if (!zb) {
 				dprint(FD_ZBD,
 				       "%s: zbd_find_zone(%lld, %llu) failed\n",
@@ -1912,8 +1920,23 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 			(zbd_zone_capacity_end(zb) - io_u->offset), min_bs);
 		goto eof;
 	case DDIR_TRIM:
-		/* fall-through */
+		/* Check random trim targets a non-empty zone */
+		if (!td_random(td) || zb->wp > zb->start)
+			goto accept;
+
+		/* Find out a non-empty zone to trim */
+		zone_unlock(zb);
+		zl = get_zone(f, f->max_zone);
+		zb = zbd_find_zone(td, io_u, 1, zb, zl);
+		if (zb) {
+			io_u->offset = zb->start;
+			dprint(FD_ZBD, "%s: found new zone(%lld) for trim\n",
+			       f->file_name, io_u->offset);
+			goto accept;
+		}
+		goto eof;
 	case DDIR_SYNC:
+		/* fall-through */
 	case DDIR_DATASYNC:
 	case DDIR_SYNC_FILE_RANGE:
 	case DDIR_WAIT:
@@ -1953,4 +1976,39 @@ char *zbd_write_status(const struct thread_stat *ts)
 	if (asprintf(&res, "; %llu zone resets", (unsigned long long) ts->nr_zone_resets) < 0)
 		return NULL;
 	return res;
+}
+
+/**
+ * zbd_do_io_u_trim - If reset zone is applicable, do reset zone instead of trim
+ *
+ * @td: FIO thread data.
+ * @io_u: FIO I/O unit.
+ *
+ * It is assumed that z->mutex is already locked.
+ * Return io_u_completed when reset zone succeeds. Return 0 when the target zone
+ * does not have write pointer. On error, return negative errno.
+ */
+int zbd_do_io_u_trim(const struct thread_data *td, struct io_u *io_u)
+{
+	struct fio_file *f = io_u->file;
+	struct fio_zone_info *z;
+	uint32_t zone_idx;
+	int ret;
+
+	zone_idx = zbd_zone_idx(f, io_u->offset);
+	z = get_zone(f, zone_idx);
+
+	if (!z->has_wp)
+		return 0;
+
+	if (io_u->offset != z->start) {
+		log_err("Trim offset not at zone start (%lld)\n", io_u->offset);
+		return -EINVAL;
+	}
+
+	ret = zbd_reset_zone((struct thread_data *)td, f, z);
+	if (ret < 0)
+		return ret;
+
+	return io_u_completed;
 }

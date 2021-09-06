@@ -766,6 +766,8 @@ starts. The \fBzonecapacity\fR parameter is ignored.
 Zoned block device mode. I/O happens sequentially in each zone, even if random
 I/O has been selected. Random I/O happens across all zones instead of being
 restricted to a single zone.
+Trim is handled using a zone reset operation. Trim only considers non-empty
+sequential write required and sequential write preferred zones.
 .RE
 .RE
 .TP
@@ -1700,9 +1702,7 @@ Sets size to something really large and waits for ENOSPC (no space left on
 device) or EDQUOT (disk quota exceeded)
 as the terminating condition. Only makes sense with sequential
 write. For a read workload, the mount point will be filled first then I/O
-started on the result. This option doesn't make sense if operating on a raw
-device node, since the size of that is already known by the file system.
-Additionally, writing beyond end-of-device will not return ENOSPC there.
+started on the result.
 .SS "I/O engine"
 .TP
 .BI ioengine \fR=\fPstr
@@ -1763,10 +1763,9 @@ character devices. This engine supports trim operations. The
 sg engine includes engine specific options.
 .TP
 .B libzbc
-Synchronous I/O engine for SMR hard-disks using the \fBlibzbc\fR
-library. The target can be either an sg character device or
-a block device file. This engine supports the zonemode=zbd zone
-operations.
+Read, write, trim and ZBC/ZAC operations to a zoned block device using
+\fBlibzbc\fR library. The target can be either an SG character device or
+a block device file.
 .TP
 .B null
 Doesn't transfer any data, just pretends to. This is mainly used to
@@ -1963,13 +1962,41 @@ In addition, there are some parameters which are only valid when a specific
 with the caveat that when used on the command line, they must come after the
 \fBioengine\fR that defines them is selected.
 .TP
-.BI (io_uring, libaio)cmdprio_percentage \fR=\fPint
-Set the percentage of I/O that will be issued with higher priority by setting
-the priority bit. Non-read I/O is likely unaffected by ``cmdprio_percentage``.
-This option cannot be used with the `prio` or `prioclass` options. For this
-option to set the priority bit properly, NCQ priority must be supported and
-enabled and `direct=1' option must be used. fio must also be run as the root
-user.
+.BI (io_uring,libaio)cmdprio_percentage \fR=\fPint[,int]
+Set the percentage of I/O that will be issued with the highest priority.
+Default: 0. A single value applies to reads and writes. Comma-separated
+values may be specified for reads and writes. This option cannot be used
+with the `prio` or `prioclass` options. For this option to be effective,
+NCQ priority must be supported and enabled, and `direct=1' option must be
+used. fio must also be run as the root user.
+.TP
+.BI (io_uring,libaio)cmdprio_class \fR=\fPint[,int]
+Set the I/O priority class to use for I/Os that must be issued with a
+priority when \fBcmdprio_percentage\fR or \fBcmdprio_bssplit\fR is set.
+If not specified when \fBcmdprio_percentage\fR or \fBcmdprio_bssplit\fR
+is set, this defaults to the highest priority class. A single value applies
+to reads and writes. Comma-separated values may be specified for reads and
+writes. See man \fBionice\fR\|(1). See also the \fBprioclass\fR option.
+.TP
+.BI (io_uring,libaio)cmdprio \fR=\fPint[,int]
+Set the I/O priority value to use for I/Os that must be issued with a
+priority when \fBcmdprio_percentage\fR or \fBcmdprio_bssplit\fR is set.
+If not specified when \fBcmdprio_percentage\fR or \fBcmdprio_bssplit\fR
+is set, this defaults to 0. Linux limits us to a positive value between
+0 and 7, with 0 being the highest. A single value applies to reads and writes.
+Comma-separated values may be specified for reads and writes. See man
+\fBionice\fR\|(1). Refer to an appropriate manpage for other operating systems
+since the meaning of priority may differ. See also the \fBprio\fR option.
+.TP
+.BI (io_uring,libaio)cmdprio_bssplit \fR=\fPstr[,str]
+To get a finer control over I/O priority, this option allows specifying
+the percentage of IOs that must have a priority set depending on the block
+size of the IO. This option is useful only when used together with the option
+\fBbssplit\fR, that is, multiple different block sizes are used for reads and
+writes. The format for this option is the same as the format of the
+\fBbssplit\fR option, with the exception that values for trim IOs are
+ignored. This option is mutually exclusive with the \fBcmdprio_percentage\fR
+option.
 .TP
 .BI (io_uring)fixedbufs
 If fio is asked to do direct IO, then Linux will map pages for each IO call, and
@@ -2044,20 +2071,20 @@ Detect when I/O threads are done, then exit.
 .BI (libhdfs)namenode \fR=\fPstr
 The hostname or IP address of a HDFS cluster namenode to contact.
 .TP
-.BI (libhdfs)port
+.BI (libhdfs)port \fR=\fPint
 The listening port of the HFDS cluster namenode.
 .TP
-.BI (netsplice,net)port
+.BI (netsplice,net)port \fR=\fPint
 The TCP or UDP port to bind to or connect to. If this is used with
 \fBnumjobs\fR to spawn multiple instances of the same job type, then
 this will be the starting port number since fio will use a range of
 ports.
 .TP
-.BI (rdma, librpma_*)port
+.BI (rdma,librpma_*)port \fR=\fPint
 The port to use for RDMA-CM communication. This should be the same
 value on the client and the server side.
 .TP
-.BI (netsplice,net, rdma)hostname \fR=\fPstr
+.BI (netsplice,net,rdma)hostname \fR=\fPstr
 The hostname or IP address to use for TCP, UDP or RDMA-CM based I/O.
 If the job is a TCP listener or UDP reader, the hostname is not used
 and must be omitted unless it is a valid UDP multicast address.
@@ -2327,10 +2354,10 @@ the use of cudaMemcpy.
 .RE
 .TP
 .BI (dfs)pool
-Specify the UUID of the DAOS pool to connect to.
+Specify the label or UUID of the DAOS pool to connect to.
 .TP
 .BI (dfs)cont
-Specify the UUID of the DAOS DAOS container to open.
+Specify the label or UUID of the DAOS container to open.
 .TP
 .BI (dfs)chunk_size
 Specificy a different chunk size (in bytes) for the dfs file.
@@ -2694,13 +2721,13 @@ Set the I/O priority value of this job. Linux limits us to a positive value
 between 0 and 7, with 0 being the highest. See man
 \fBionice\fR\|(1). Refer to an appropriate manpage for other operating
 systems since meaning of priority may differ. For per-command priority
-setting, see I/O engine specific `cmdprio_percentage` and `hipri_percentage`
-options.
+setting, see the I/O engine specific `cmdprio_percentage` and
+`cmdprio` options.
 .TP
 .BI prioclass \fR=\fPint
 Set the I/O priority class. See man \fBionice\fR\|(1). For per-command
-priority setting, see I/O engine specific `cmdprio_percentage` and `hipri_percent`
-options.
+priority setting, see the I/O engine specific `cmdprio_percentage` and
+`cmdprio_class` options.
 .TP
 .BI cpus_allowed \fR=\fPstr
 Controls the same options as \fBcpumask\fR, but accepts a textual
@@ -3238,6 +3265,11 @@ you instead want to log the maximum value, set this option to 1. Defaults to
 If this is set, the iolog options will include the byte offset for the I/O
 entry as well as the other data values. Defaults to 0 meaning that
 offsets are not present in logs. Also see \fBLOG FILE FORMATS\fR section.
+.TP
+.BI log_prio \fR=\fPbool
+If this is set, the iolog options will include the I/O priority for the I/O
+entry as well as the other data values. Defaults to 0 meaning that
+I/O priorities are not present in logs. Also see \fBLOG FILE FORMATS\fR section.
 .TP
 .BI log_compression \fR=\fPint
 If this is set, fio will compress the I/O logs as it goes, to keep the
@@ -4172,8 +4204,14 @@ The entry's `block size' is always in bytes. The `offset' is the position in byt
 from the start of the file for that particular I/O. The logging of the offset can be
 toggled with \fBlog_offset\fR.
 .P
-`Command priority` is 0 for normal priority and 1 for high priority. This is controlled
-by the ioengine specific \fBcmdprio_percentage\fR.
+If \fBlog_prio\fR is not set, the entry's `Command priority` is 1 for an IO executed
+with the highest RT priority class (\fBprioclass\fR=1 or \fBcmdprio_class\fR=1) and 0
+otherwise. This is controlled by the \fBprioclass\fR option and the ioengine specific
+\fBcmdprio_percentage\fR \fBcmdprio_class\fR options. If \fBlog_prio\fR is set, the
+entry's `Command priority` is the priority set for the IO, as a 16-bits hexadecimal
+number with the lowest 13 bits indicating the priority value (\fBprio\fR and
+\fBcmdprio\fR options) and the highest 3 bits indicating the IO priority class
+(\fBprioclass\fR and \fBcmdprio_class\fR options).
 .P
 Fio defaults to logging every individual I/O but when windowed logging is set
 through \fBlog_avg_msec\fR, either the average (by default) or the maximum
