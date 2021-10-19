@@ -17,7 +17,11 @@
 #include "zbd.h"
 #include "oslib/asprintf.h"
 
+#ifdef WIN32
+#define LOG_MSEC_SLACK	2
+#else
 #define LOG_MSEC_SLACK	1
+#endif
 
 struct fio_sem *stat_sem;
 
@@ -211,7 +215,7 @@ static void show_clat_percentiles(uint64_t *io_u_plat, unsigned long long nr,
 
 	len = calc_clat_percentiles(io_u_plat, nr, plist, &ovals, &maxv, &minv);
 	if (!len || !ovals)
-		goto out;
+		return;
 
 	/*
 	 * We default to nsecs, but if the value range is such that we
@@ -258,7 +262,6 @@ static void show_clat_percentiles(uint64_t *io_u_plat, unsigned long long nr,
 			log_buf(out, "\n");
 	}
 
-out:
 	free(ovals);
 }
 

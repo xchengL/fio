@@ -83,12 +83,12 @@ int zbd_report_zones(struct thread_data *td, struct fio_file *f,
 		ret = blkzoned_report_zones(td, f, offset, zones, nr_zones);
 	if (ret < 0) {
 		td_verror(td, errno, "report zones failed");
-		log_err("%s: report zones from sector %llu failed (%d).\n",
-			f->file_name, (unsigned long long)offset >> 9, errno);
+		log_err("%s: report zones from sector %"PRIu64" failed (%d).\n",
+			f->file_name, offset >> 9, errno);
 	} else if (ret == 0) {
 		td_verror(td, errno, "Empty zone report");
-		log_err("%s: report zones from sector %llu is empty.\n",
-			f->file_name, (unsigned long long)offset >> 9);
+		log_err("%s: report zones from sector %"PRIu64" is empty.\n",
+			f->file_name, offset >> 9);
 		ret = -EIO;
 	}
 
@@ -116,9 +116,8 @@ int zbd_reset_wp(struct thread_data *td, struct fio_file *f,
 		ret = blkzoned_reset_wp(td, f, offset, length);
 	if (ret < 0) {
 		td_verror(td, errno, "resetting wp failed");
-		log_err("%s: resetting wp for %llu sectors at sector %llu failed (%d).\n",
-			f->file_name, (unsigned long long)length >> 9,
-			(unsigned long long)offset >> 9, errno);
+		log_err("%s: resetting wp for %"PRIu64" sectors at sector %"PRIu64" failed (%d).\n",
+			f->file_name, length >> 9, offset >> 9, errno);
 	}
 
 	return ret;
@@ -318,16 +317,16 @@ static bool zbd_verify_sizes(void)
 					return false;
 				}
 			} else if (td->o.zone_size != f->zbd_info->zone_size) {
-				log_err("%s: job parameter zonesize %llu does not match disk zone size %llu.\n",
-					f->file_name, (unsigned long long) td->o.zone_size,
-					(unsigned long long) f->zbd_info->zone_size);
+				log_err("%s: job parameter zonesize %llu does not match disk zone size %"PRIu64".\n",
+					f->file_name, td->o.zone_size,
+					f->zbd_info->zone_size);
 				return false;
 			}
 
 			if (td->o.zone_skip % td->o.zone_size) {
 				log_err("%s: zoneskip %llu is not a multiple of the device zone size %llu.\n",
-					f->file_name, (unsigned long long) td->o.zone_skip,
-					(unsigned long long) td->o.zone_size);
+					f->file_name, td->o.zone_skip,
+					td->o.zone_size);
 				return false;
 			}
 
@@ -341,9 +340,9 @@ static bool zbd_verify_sizes(void)
 						 f->file_name);
 					return false;
 				}
-				log_info("%s: rounded up offset from %llu to %llu\n",
-					 f->file_name, (unsigned long long) f->file_offset,
-					 (unsigned long long) new_offset);
+				log_info("%s: rounded up offset from %"PRIu64" to %"PRIu64"\n",
+					 f->file_name, f->file_offset,
+					 new_offset);
 				f->io_size -= (new_offset - f->file_offset);
 				f->file_offset = new_offset;
 			}
@@ -357,9 +356,9 @@ static bool zbd_verify_sizes(void)
 						 f->file_name);
 					return false;
 				}
-				log_info("%s: rounded down io_size from %llu to %llu\n",
-					 f->file_name, (unsigned long long) f->io_size,
-					 (unsigned long long) new_end - f->file_offset);
+				log_info("%s: rounded down io_size from %"PRIu64" to %"PRIu64"\n",
+					 f->file_name, f->io_size,
+					 new_end - f->file_offset);
 				f->io_size = new_end - f->file_offset;
 			}
 		}
@@ -388,17 +387,17 @@ static bool zbd_verify_bs(void)
 				continue;
 			zone_size = f->zbd_info->zone_size;
 			if (td_trim(td) && td->o.bs[DDIR_TRIM] != zone_size) {
-				log_info("%s: trim block size %llu is not the zone size %llu\n",
+				log_info("%s: trim block size %llu is not the zone size %"PRIu64"\n",
 					 f->file_name, td->o.bs[DDIR_TRIM],
-					 (unsigned long long)zone_size);
+					 zone_size);
 				return false;
 			}
 			for (k = 0; k < FIO_ARRAY_SIZE(td->o.bs); k++) {
 				if (td->o.verify != VERIFY_NONE &&
 				    zone_size % td->o.bs[k] != 0) {
-					log_info("%s: block size %llu is not a divisor of the zone size %llu\n",
+					log_info("%s: block size %llu is not a divisor of the zone size %"PRIu64"\n",
 						 f->file_name, td->o.bs[k],
-						 (unsigned long long)zone_size);
+						 zone_size);
 					return false;
 				}
 			}
@@ -448,8 +447,7 @@ static int init_zone_info(struct thread_data *td, struct fio_file *f)
 
 	if (zone_capacity > zone_size) {
 		log_err("%s: job parameter zonecapacity %llu is larger than zone size %llu\n",
-			f->file_name, (unsigned long long) td->o.zone_capacity,
-			(unsigned long long) td->o.zone_size);
+			f->file_name, td->o.zone_capacity, td->o.zone_size);
 		return 1;
 	}
 
@@ -525,15 +523,14 @@ static int parse_zone_info(struct thread_data *td, struct fio_file *f)
 	if (td->o.zone_size == 0) {
 		td->o.zone_size = zone_size;
 	} else if (td->o.zone_size != zone_size) {
-		log_err("fio: %s job parameter zonesize %llu does not match disk zone size %llu.\n",
-			f->file_name, (unsigned long long) td->o.zone_size,
-			(unsigned long long) zone_size);
+		log_err("fio: %s job parameter zonesize %llu does not match disk zone size %"PRIu64".\n",
+			f->file_name, td->o.zone_size, zone_size);
 		ret = -EINVAL;
 		goto out;
 	}
 
-	dprint(FD_ZBD, "Device %s has %d zones of size %llu KB\n", f->file_name,
-	       nr_zones, (unsigned long long) zone_size / 1024);
+	dprint(FD_ZBD, "Device %s has %d zones of size %"PRIu64" KB\n", f->file_name,
+	       nr_zones, zone_size / 1024);
 
 	zbd_info = scalloc(1, sizeof(*zbd_info) +
 			   (nr_zones + 1) * sizeof(zbd_info->zone_info[0]));
@@ -587,9 +584,8 @@ static int parse_zone_info(struct thread_data *td, struct fio_file *f)
 					   ZBD_REPORT_MAX_ZONES));
 		if (nrz < 0) {
 			ret = nrz;
-			log_info("fio: report zones (offset %llu) failed for %s (%d).\n",
-			 	 (unsigned long long)offset,
-				 f->file_name, -ret);
+			log_info("fio: report zones (offset %"PRIu64") failed for %s (%d).\n",
+				 offset, f->file_name, -ret);
 			goto out;
 		}
 	}
@@ -972,7 +968,7 @@ static int zbd_reset_zones(struct thread_data *td, struct fio_file *f,
 			   struct fio_zone_info *const ze)
 {
 	struct fio_zone_info *z;
-	const uint32_t min_bs = td->o.min_bs[DDIR_WRITE];
+	const uint64_t min_bs = td->o.min_bs[DDIR_WRITE];
 	int res = 0;
 
 	assert(min_bs);
@@ -1145,7 +1141,7 @@ static bool is_zone_open(const struct thread_data *td, const struct fio_file *f,
 static bool zbd_open_zone(struct thread_data *td, const struct fio_file *f,
 			  uint32_t zone_idx)
 {
-	const uint32_t min_bs = td->o.min_bs[DDIR_WRITE];
+	const uint64_t min_bs = td->o.min_bs[DDIR_WRITE];
 	struct zoned_block_device_info *zbdi = f->zbd_info;
 	struct fio_zone_info *z = get_zone(f, zone_idx);
 	bool res = true;
@@ -1204,6 +1200,19 @@ static uint32_t pick_random_zone_idx(const struct fio_file *f,
 		f->io_size;
 }
 
+static bool any_io_in_flight(void)
+{
+	struct thread_data *td;
+	int i;
+
+	for_each_td(td, i) {
+		if (td->io_u_in_flight)
+			return true;
+	}
+
+	return false;
+}
+
 /*
  * Modify the offset of an I/O unit that does not refer to an open zone such
  * that it refers to an open zone. Close an open zone and open a new zone if
@@ -1215,7 +1224,7 @@ static uint32_t pick_random_zone_idx(const struct fio_file *f,
 static struct fio_zone_info *zbd_convert_to_open_zone(struct thread_data *td,
 						      struct io_u *io_u)
 {
-	const uint32_t min_bs = td->o.min_bs[io_u->ddir];
+	const uint64_t min_bs = td->o.min_bs[io_u->ddir];
 	struct fio_file *f = io_u->file;
 	struct zoned_block_device_info *zbdi = f->zbd_info;
 	struct fio_zone_info *z;
@@ -1223,6 +1232,8 @@ static struct fio_zone_info *zbd_convert_to_open_zone(struct thread_data *td,
 	uint32_t zone_idx, new_zone_idx;
 	int i;
 	bool wait_zone_close;
+	bool in_flight;
+	bool should_retry = true;
 
 	assert(is_valid_offset(f, io_u->offset));
 
@@ -1337,6 +1348,7 @@ open_other_zone:
 		io_u_quiesce(td);
 	}
 
+retry:
 	/* Zone 'z' is full, so try to open a new zone. */
 	for (i = f->io_size / zbdi->zone_size; i > 0; i--) {
 		zone_idx++;
@@ -1376,6 +1388,24 @@ open_other_zone:
 			goto out;
 		pthread_mutex_lock(&zbdi->mutex);
 	}
+
+	/*
+	 * When any I/O is in-flight or when all I/Os in-flight get completed,
+	 * the I/Os might have closed zones then retry the steps to open a zone.
+	 * Before retry, call io_u_quiesce() to complete in-flight writes.
+	 */
+	in_flight = any_io_in_flight();
+	if (in_flight || should_retry) {
+		dprint(FD_ZBD, "%s(%s): wait zone close and retry open zones\n",
+		       __func__, f->file_name);
+		pthread_mutex_unlock(&zbdi->mutex);
+		zone_unlock(z);
+		io_u_quiesce(td);
+		zone_lock(td, f, z);
+		should_retry = in_flight;
+		goto retry;
+	}
+
 	pthread_mutex_unlock(&zbdi->mutex);
 	zone_unlock(z);
 	dprint(FD_ZBD, "%s(%s): did not open another zone\n", __func__,
@@ -1397,7 +1427,7 @@ static struct fio_zone_info *zbd_replay_write_order(struct thread_data *td,
 						    struct fio_zone_info *z)
 {
 	const struct fio_file *f = io_u->file;
-	const uint32_t min_bs = td->o.min_bs[DDIR_WRITE];
+	const uint64_t min_bs = td->o.min_bs[DDIR_WRITE];
 
 	if (!zbd_open_zone(td, f, zbd_zone_nr(f, z))) {
 		zone_unlock(z);
@@ -1406,8 +1436,8 @@ static struct fio_zone_info *zbd_replay_write_order(struct thread_data *td,
 	}
 
 	if (z->verify_block * min_bs >= z->capacity) {
-		log_err("%s: %d * %d >= %llu\n", f->file_name, z->verify_block,
-			min_bs, (unsigned long long)z->capacity);
+		log_err("%s: %d * %"PRIu64" >= %"PRIu64"\n", f->file_name, z->verify_block,
+			min_bs, z->capacity);
 		/*
 		 * If the assertion below fails during a test run, adding
 		 * "--experimental_verify=1" to the command line may help.
@@ -1416,8 +1446,8 @@ static struct fio_zone_info *zbd_replay_write_order(struct thread_data *td,
 	}
 	io_u->offset = z->start + z->verify_block * min_bs;
 	if (io_u->offset + io_u->buflen >= zbd_zone_capacity_end(z)) {
-		log_err("%s: %llu + %llu >= %llu\n", f->file_name, io_u->offset,
-			io_u->buflen, (unsigned long long) zbd_zone_capacity_end(z));
+		log_err("%s: %llu + %llu >= %"PRIu64"\n", f->file_name, io_u->offset,
+			io_u->buflen, zbd_zone_capacity_end(z));
 		assert(false);
 	}
 	z->verify_block += io_u->buflen / min_bs;
@@ -1433,7 +1463,7 @@ static struct fio_zone_info *zbd_replay_write_order(struct thread_data *td,
  * pointer, hold the mutex for the zone.
  */
 static struct fio_zone_info *
-zbd_find_zone(struct thread_data *td, struct io_u *io_u, uint32_t min_bytes,
+zbd_find_zone(struct thread_data *td, struct io_u *io_u, uint64_t min_bytes,
 	      struct fio_zone_info *zb, struct fio_zone_info *zl)
 {
 	struct fio_file *f = io_u->file;
@@ -1465,7 +1495,7 @@ zbd_find_zone(struct thread_data *td, struct io_u *io_u, uint32_t min_bytes,
 				zone_unlock(z2);
 		}
 	}
-	dprint(FD_ZBD, "%s: no zone has %d bytes of readable data\n",
+	dprint(FD_ZBD, "%s: no zone has %"PRIu64" bytes of readable data\n",
 	       f->file_name, min_bytes);
 	return NULL;
 }
@@ -1638,10 +1668,9 @@ void setup_zbd_zone_mode(struct thread_data *td, struct io_u *io_u)
 	    f->last_pos[ddir] >= zbd_zone_capacity_end(z)) {
 		dprint(FD_ZBD,
 		       "%s: Jump from zone capacity limit to zone end:"
-		       " (%llu -> %llu) for zone %u (%llu)\n",
-		       f->file_name, (unsigned long long) f->last_pos[ddir],
-		       (unsigned long long) zbd_zone_end(z), zone_idx,
-		       (unsigned long long) z->capacity);
+		       " (%"PRIu64" -> %"PRIu64") for zone %u (%"PRIu64")\n",
+		       f->file_name, f->last_pos[ddir],
+		       zbd_zone_end(z), zone_idx, z->capacity);
 		td->io_skip_bytes += zbd_zone_end(z) - f->last_pos[ddir];
 		f->last_pos[ddir] = zbd_zone_end(z);
 	}
@@ -1725,7 +1754,7 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 	uint32_t zone_idx_b;
 	struct fio_zone_info *zb, *zl, *orig_zb;
 	uint32_t orig_len = io_u->buflen;
-	uint32_t min_bs = td->o.min_bs[io_u->ddir];
+	uint64_t min_bs = td->o.min_bs[io_u->ddir];
 	uint64_t new_len;
 	int64_t range;
 
@@ -1751,9 +1780,9 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 
 		if (io_u->offset + min_bs > (zb + 1)->start) {
 			dprint(FD_IO,
-			       "%s: off=%llu + min_bs=%u > next zone %llu\n",
+			       "%s: off=%llu + min_bs=%"PRIu64" > next zone %"PRIu64"\n",
 			       f->file_name, io_u->offset,
-			       min_bs, (unsigned long long) (zb + 1)->start);
+			       min_bs, (zb + 1)->start);
 			io_u->offset = zb->start + (zb + 1)->start - io_u->offset;
 			new_len = min(io_u->buflen, (zb + 1)->start - io_u->offset);
 		} else {
@@ -1844,9 +1873,8 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 		if (io_u->buflen > zbdi->zone_size) {
 			td_verror(td, EINVAL, "I/O buflen exceeds zone size");
 			dprint(FD_IO,
-			       "%s: I/O buflen %llu exceeds zone size %llu\n",
-			       f->file_name, io_u->buflen,
-			       (unsigned long long) zbdi->zone_size);
+			       "%s: I/O buflen %llu exceeds zone size %"PRIu64"\n",
+			       f->file_name, io_u->buflen, zbdi->zone_size);
 			goto eof;
 		}
 		if (!zbd_open_zone(td, f, zone_idx_b)) {
@@ -1857,7 +1885,6 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 				       f->file_name);
 				goto eof;
 			}
-			zone_idx_b = zbd_zone_nr(f, zb);
 		}
 		/* Check whether the zone reset threshold has been exceeded */
 		if (td->o.zrf.u.f) {
@@ -1884,9 +1911,8 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 
 			if (zb->capacity < min_bs) {
 				td_verror(td, EINVAL, "ZCAP is less min_bs");
-				log_err("zone capacity %llu smaller than minimum block size %d\n",
-					(unsigned long long)zb->capacity,
-					min_bs);
+				log_err("zone capacity %"PRIu64" smaller than minimum block size %"PRIu64"\n",
+					zb->capacity, min_bs);
 				goto eof;
 			}
 		}
@@ -1916,7 +1942,7 @@ enum io_u_action zbd_adjust_block(struct thread_data *td, struct io_u *io_u)
 			goto accept;
 		}
 		td_verror(td, EIO, "zone remainder too small");
-		log_err("zone remainder %lld smaller than min block size %d\n",
+		log_err("zone remainder %lld smaller than min block size %"PRIu64"\n",
 			(zbd_zone_capacity_end(zb) - io_u->offset), min_bs);
 		goto eof;
 	case DDIR_TRIM:
@@ -1973,7 +1999,7 @@ char *zbd_write_status(const struct thread_stat *ts)
 {
 	char *res;
 
-	if (asprintf(&res, "; %llu zone resets", (unsigned long long) ts->nr_zone_resets) < 0)
+	if (asprintf(&res, "; %"PRIu64" zone resets", ts->nr_zone_resets) < 0)
 		return NULL;
 	return res;
 }
