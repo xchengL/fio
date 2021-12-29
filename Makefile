@@ -236,6 +236,7 @@ endif
 ifeq ($(CONFIG_TARGET_OS), Android)
   SOURCE += diskutil.c fifo.c blktrace.c cgroup.c trim.c profiles/tiobench.c \
 		oslib/linux-dev-lookup.c engines/io_uring.c
+  cmdprio_SRCS = engines/cmdprio.c
 ifdef CONFIG_HAS_BLKZONED
   SOURCE += oslib/linux-blkzoned.c
 endif
@@ -374,8 +375,7 @@ T_VS_PROGS = t/fio-verify-state
 T_PIPE_ASYNC_OBJS = t/read-to-pipe-async.o
 T_PIPE_ASYNC_PROGS = t/read-to-pipe-async
 
-T_IOU_RING_OBJS = t/io_uring.o
-T_IOU_RING_OBJS += t/arch.o
+T_IOU_RING_OBJS = t/io_uring.o lib/rand.o lib/pattern.o lib/strntol.o
 T_IOU_RING_PROGS = t/io_uring
 
 T_MEMLOCK_OBJS = t/memlock.o

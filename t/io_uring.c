@@ -28,6 +28,7 @@
 #include "../arch/arch.h"
 #include "../lib/types.h"
 #include "../lib/roundup.h"
+#include "../lib/rand.h"
 #include "../minmax.h"
 #include "../os/linux/io_uring.h"
 
@@ -59,6 +60,8 @@ static unsigned sq_ring_mask, cq_ring_mask;
 
 struct file {
 	unsigned long max_blocks;
+	unsigned long max_size;
+	unsigned long cur_off;
 	unsigned pending_ios;
 	int real_fd;
 	int fixed_fd;
@@ -85,6 +88,8 @@ struct submitter {
 	volatile int finish;
 
 	__s32 *fds;
+
+	struct taus258_state rand_state;
 
 	unsigned long *clock_batch;
 	int clock_index;
@@ -120,7 +125,8 @@ static int do_nop = 0;		/* no-op SQ ring commands */
 static int nthreads = 1;
 static int stats = 0;		/* generate IO stats */
 static int aio = 0;		/* use libaio */
-static int runtime = 0;	/* runtime */
+static int runtime = 0;		/* runtime */
+static int random_io = 1;	/* random or sequential IO */
 
 static unsigned long tsc_rate;
 
@@ -186,7 +192,7 @@ unsigned int calc_clat_percentiles(unsigned long *io_u_plat, unsigned long nr,
 	unsigned long *ovals = NULL;
 	bool is_last;
 
-	*minv = -1ULL;
+	*minv = -1UL;
 	*maxv = 0;
 
 	ovals = malloc(len * sizeof(*ovals));
@@ -378,6 +384,13 @@ static int io_uring_register_files(struct submitter *s)
 
 static int io_uring_setup(unsigned entries, struct io_uring_params *p)
 {
+	/*
+	 * Clamp CQ ring size at our SQ ring size, we don't need more entries
+	 * than that.
+	 */
+	p->flags |= IORING_SETUP_CQSIZE;
+	p->cq_entries = entries;
+
 	return syscall(__NR_io_uring_setup, entries, p);
 }
 
@@ -448,8 +461,15 @@ static void init_io(struct submitter *s, unsigned index)
 	}
 	f->pending_ios++;
 
-	r = lrand48();
-	offset = (r % (f->max_blocks - 1)) * bs;
+	if (random_io) {
+		r = __rand64(&s->rand_state);
+		offset = (r % (f->max_blocks - 1)) * bs;
+	} else {
+		offset = f->cur_off;
+		f->cur_off += bs;
+		if (f->cur_off + bs > f->max_size)
+			f->cur_off = 0;
+	}
 
 	if (register_files) {
 		sqe->flags = IOSQE_FIXED_FILE;
@@ -478,7 +498,7 @@ static void init_io(struct submitter *s, unsigned index)
 	sqe->off = offset;
 	sqe->user_data = (unsigned long) f->fileno;
 	if (stats && stats_running)
-		sqe->user_data |= ((unsigned long)s->clock_index << 32);
+		sqe->user_data |= ((uint64_t)s->clock_index << 32);
 }
 
 static int prep_more_ios_uring(struct submitter *s, int max_ios)
@@ -517,9 +537,11 @@ static int get_file_size(struct file *f)
 			return -1;
 
 		f->max_blocks = bytes / bs;
+		f->max_size = bytes;
 		return 0;
 	} else if (S_ISREG(st.st_mode)) {
 		f->max_blocks = st.st_size / bs;
+		f->max_size = st.st_size;
 		return 0;
 	}
 
@@ -586,6 +608,7 @@ static int submitter_init(struct submitter *s)
 	s->tid = gettid();
 	printf("submitter=%d, tid=%d\n", s->index, s->tid);
 
+	__init_rand64(&s->rand_state, pthread_self());
 	srand48(pthread_self());
 
 	for (i = 0; i < MAX_FDS; i++)
@@ -611,7 +634,8 @@ static int submitter_init(struct submitter *s)
 #ifdef CONFIG_LIBAIO
 static int prep_more_ios_aio(struct submitter *s, int max_ios, struct iocb *iocbs)
 {
-	unsigned long offset, data;
+	uint64_t data;
+	long long offset;
 	struct file *f;
 	unsigned index;
 	long r;
@@ -640,7 +664,7 @@ static int prep_more_ios_aio(struct submitter *s, int max_ios, struct iocb *iocb
 
 		data = f->fileno;
 		if (stats && stats_running)
-			data |= ((unsigned long) s->clock_index << 32);
+			data |= (((uint64_t) s->clock_index) << 32);
 		iocb->data = (void *) (uintptr_t) data;
 		index++;
 	}
@@ -653,7 +677,7 @@ static int reap_events_aio(struct submitter *s, struct io_event *events, int evs
 	int reaped = 0;
 
 	while (evs) {
-		unsigned long data = (uintptr_t) events[reaped].data;
+		uint64_t data = (uintptr_t) events[reaped].data;
 		struct file *f = &s->files[data & 0xffffffff];
 
 		f->pending_ios--;
@@ -1066,11 +1090,12 @@ static void usage(char *argv, int status)
 		" -N <bool> : Perform just no-op requests, default %d\n"
 		" -t <bool> : Track IO latencies, default %d\n"
 		" -T <int>  : TSC rate in HZ\n"
-		" -a <bool> : Use legacy aio, default %d\n"
-		" -r <int>  : Runtime in seconds, default %s\n",
+		" -r <int>  : Runtime in seconds, default %s\n"
+		" -R <bool> : Use random IO, default %d\n"
+		" -a <bool> : Use legacy aio, default %d\n",
 		argv, DEPTH, BATCH_SUBMIT, BATCH_COMPLETE, BS, polled,
 		fixedbufs, dma_map, register_files, nthreads, !buffered, do_nop,
-		stats, aio, runtime == 0 ? "unlimited" : runtime_str);
+		stats, runtime == 0 ? "unlimited" : runtime_str, random_io, aio);
 	exit(status);
 }
 
@@ -1130,7 +1155,7 @@ int main(int argc, char *argv[])
 	if (!do_nop && argc < 2)
 		usage(argv[0], 1);
 
-	while ((opt = getopt(argc, argv, "d:s:c:b:p:B:F:n:N:O:t:T:a:r:D:h?")) != -1) {
+	while ((opt = getopt(argc, argv, "d:s:c:b:p:B:F:n:N:O:t:T:a:r:D:R:h?")) != -1) {
 		switch (opt) {
 		case 'a':
 			aio = !!atoi(optarg);
@@ -1193,6 +1218,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'D':
 			dma_map = !!atoi(optarg);
+			break;
+		case 'R':
+			random_io = !!atoi(optarg);
 			break;
 		case 'h':
 		case '?':
