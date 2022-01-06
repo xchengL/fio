@@ -328,6 +328,8 @@ elif check_define __sun__ ; then
   CFLAGS="$CFLAGS -D_REENTRANT"
 elif check_define _WIN32 ; then
   targetos='CYGWIN'
+elif check_define __vxworks ; then
+  targetos='VxWorks'
 else
   targetos=`uname -s`
 fi
@@ -556,9 +558,16 @@ else
 #include <endian.h>
 int main(void)
 {
-#if __BYTE_ORDER != __BIG_ENDIAN
-# error "Unknown endianness"
+#ifdef __vxworks
+  #if _BYTE_ORDER != _BIG_ENDIAN
+    #error "Unknown endianness"
+  #endif
+#else
+  #if __BYTE_ORDER != __BIG_ENDIAN
+    #error "Unknown endianness"
+  #endif
 #endif
+  return 0;
 }
 EOF
   compile_prog "" "" "endian" && bigendian="yes"

@@ -284,6 +284,11 @@ ifneq (,$(findstring CYGWIN,$(CONFIG_TARGET_OS)))
   LIBS	 += -lpthread -lpsapi -lws2_32 -lssp
   FIO_CFLAGS += -DPSAPI_VERSION=1 -Ios/windows/posix/include -Wno-format
 endif
+ifeq ($(CONFIG_TARGET_OS), VxWorks)
+  SOURCE += os/vxworks/posix.c
+  VXWORKS_OBJS = os/vxworks/posix.o
+  FIO_CFLAGS += -Ios/vxworks/posix/include
+endif
 
 ifdef cmdprio_SRCS
   SOURCE += $(cmdprio_SRCS)
@@ -427,6 +432,12 @@ ifneq (,$(findstring CYGWIN,$(CONFIG_TARGET_OS)))
     T_DEDUPE_OBJS += $(WINDOWS_OBJS)
     T_SMALLOC_OBJS += $(WINDOWS_OBJS)
     T_LFSR_TEST_OBJS += $(WINDOWS_OBJS)
+endif
+
+ifeq ($(CONFIG_TARGET_OS), VxWorks)
+    T_DEDUPE_OBJS += $(VXWORKS_OBJS)
+    T_SMALLOC_OBJS += $(VXWORKS_OBJS)
+    T_LFSR_TEST_OBJS += $(VXWORKS_OBJS)
 endif
 
 T_TEST_PROGS = $(T_SMALLOC_PROGS)

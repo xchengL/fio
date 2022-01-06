@@ -176,23 +176,27 @@ static bool add_pool(struct pool *pool, unsigned int alloc_size)
 	pool->free_blocks = bitmap_blocks * SMALLOC_BPI;
 
 	mmap_flags = OS_MAP_ANON;
-#ifdef CONFIG_ESX
+#if defined (CONFIG_ESX) || defined (__vxworks)
 	mmap_flags |= MAP_PRIVATE;
 #else
 	mmap_flags |= MAP_SHARED;
 #endif
 	ptr = mmap(NULL, alloc_size, PROT_READ|PROT_WRITE, mmap_flags, -1, 0);
 
-	if (ptr == MAP_FAILED)
+	if (ptr == MAP_FAILED) {
+		perror("smalloc: mmap add_pool\n");
 		goto out_fail;
+	}
 
 	pool->map = ptr;
 	pool->bitmap = (unsigned int *)((char *) ptr + (pool->nr_blocks * SMALLOC_BPL));
 	memset(pool->bitmap, 0, bitmap_blocks * sizeof(unsigned int));
 
 	pool->lock = fio_sem_init(FIO_SEM_UNLOCKED);
-	if (!pool->lock)
+	if (!pool->lock) {
+		log_err ("fio_sem_init failed!\n");
 		goto out_fail;
+	}
 
 	nr_pools++;
 	return true;
@@ -212,13 +216,17 @@ void sinit(void)
 	 * sinit() can be called more than once if alloc-size is
 	 * set. But we want to allocate space for the struct pool
 	 * instances only once.
+	 * VxWorks unsupport MAP_ANO | MAP_SHARED
 	 */
 	if (!mp) {
 		mp = (struct pool *) mmap(NULL,
 			MAX_POOLS * sizeof(struct pool),
 			PROT_READ | PROT_WRITE,
+#ifdef __vxworks
+			OS_MAP_ANON | MAP_PRIVATE, -1, 0);
+#else
 			OS_MAP_ANON | MAP_SHARED, -1, 0);
-
+#endif
 		assert(mp != MAP_FAILED);
 	}
 
