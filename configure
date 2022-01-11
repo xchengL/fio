@@ -129,6 +129,19 @@ EOF
   compile_object
 }
 
+check_equal() {
+  cat > $TMPC <<EOF
+#if !defined($1) || ($1) != ($2)
+#error $1 is not equal to $2
+#endif
+int main(void)
+{
+  return 0;
+}
+EOF
+  compile_object
+}
+
 output_sym() {
   echo "$1=y" >> $config_host_mak
   echo "#define $1" >> $config_host_h
@@ -481,6 +494,14 @@ elif check_define __aarch64__ ; then
   cpu="aarch64"
 elif check_define __hppa__ ; then
   cpu="hppa"
+elif check_define __riscv ; then
+  if check_equal __riscv_xlen 64; then
+    cpu="riscv64"
+  elif check_equal __riscv_xlen 32; then
+    cpu="riscv32"
+  else
+    cpu="riscv"
+  fi
 else
   cpu=`uname -m`
 fi
@@ -510,6 +531,9 @@ case "$cpu" in
   ;;
   sparc|sun4[cdmuv])
     cpu="sparc"
+  ;;
+  riscv*)
+    cpu="$cpu"
   ;;
   *)
   echo "Unknown CPU"
