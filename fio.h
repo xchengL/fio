@@ -380,7 +380,7 @@ struct thread_data {
 
 	struct timespec start;	/* start of this loop */
 	struct timespec epoch;	/* time job was started */
-	unsigned long long unix_epoch; /* Time job was started, unix epoch based. */
+	unsigned long long alternate_epoch; /* Time job was started, clock_gettime's clock_id epoch based. */
 	struct timespec last_issue;
 	long time_offset;
 	struct timespec ts_cache;
@@ -428,6 +428,8 @@ struct thread_data {
 	struct flist_head io_log_list;
 	FILE *io_log_rfile;
 	unsigned int io_log_blktrace;
+	unsigned int io_log_blktrace_swap;
+	unsigned long long io_log_blktrace_last_ttime;
 	unsigned int io_log_current;
 	unsigned int io_log_checkmark;
 	unsigned int io_log_highmark;

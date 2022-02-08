@@ -1344,7 +1344,7 @@ I/O type
 .. option:: fdatasync=int
 
 	Like :option:`fsync` but uses :manpage:`fdatasync(2)` to only sync data and
-	not metadata blocks. In Windows, FreeBSD, DragonFlyBSD or OSX there is no
+	not metadata blocks. In Windows, DragonFlyBSD or OSX there is no
 	:manpage:`fdatasync(2)` so this falls back to using :manpage:`fsync(2)`.
 	Defaults to 0, which means fio does not periodically issue and wait for a
 	data-only sync to complete.
@@ -1886,11 +1886,12 @@ I/O size
 
 .. option:: filesize=irange(int)
 
-	Individual file sizes. May be a range, in which case fio will select sizes
-	for files at random within the given range and limited to :option:`size` in
-	total (if that is given). If not given, each created file is the same size.
-	This option overrides :option:`size` in terms of file size, which means
-	this value is used as a fixed size or possible range of each file.
+	Individual file sizes. May be a range, in which case fio will select sizes for
+	files at random within the given range. If not given, each created file is the
+	same size. This option overrides :option:`size` in terms of file size, i.e. if
+	:option:`filesize` is specified then :option:`size` becomes merely the default
+	for :option:`io_size` and has no effect at all if :option:`io_size` is set
+	explicitly.
 
 .. option:: file_append=bool
 
@@ -2211,10 +2212,28 @@ with the caveat that when used on the command line, they must come after the
 	depending on the block size of the IO. This option is useful only
 	when used together with the :option:`bssplit` option, that is,
 	multiple different block sizes are used for reads and writes.
-	The format for this option is the same as the format of the
-	:option:`bssplit` option, with the exception that values for
-	trim IOs are ignored. This option is mutually exclusive with the
-	:option:`cmdprio_percentage` option.
+
+	The first accepted format for this option is the same as the format of
+	the :option:`bssplit` option:
+
+		cmdprio_bssplit=blocksize/percentage:blocksize/percentage
+
+	In this case, each entry will use the priority class and priority
+	level defined by the options :option:`cmdprio_class` and
+	:option:`cmdprio` respectively.
+
+	The second accepted format for this option is:
+
+		cmdprio_bssplit=blocksize/percentage/class/level:blocksize/percentage/class/level
+
+	In this case, the priority class and priority level is defined inside
+	each entry. In comparison with the first accepted format, the second
+	accepted format does not restrict all entries to have the same priority
+	class and priority level.
+
+	For both formats, only the read and write data directions are supported,
+	values for trim IOs are ignored. This option is mutually exclusive with
+	the :option:`cmdprio_percentage` option.
 
 .. option:: fixedbufs : [io_uring]
 
@@ -2496,11 +2515,13 @@ with the caveat that when used on the command line, they must come after the
 
 	**write**
 		This is the default where write opcodes are issued as usual.
-	**verify**
+	**write_and_verify**
 		Issue WRITE AND VERIFY commands. The BYTCHK bit is set to 0. This
 		directs the device to carry out a medium verification with no data
 		comparison. The writefua option is ignored with this selection.
-	**same**
+	**verify**
+		This option is deprecated. Use write_and_verify instead.
+	**write_same**
 		Issue WRITE SAME commands. This transfers a single block to the device
 		and writes this same block of data to a contiguous sequence of LBAs
 		beginning at the specified offset. fio's block size parameter specifies
@@ -2511,6 +2532,36 @@ with the caveat that when used on the command line, they must come after the
 		for each command but only the first 512 bytes will be used and
 		transferred to the device. The writefua option is ignored with this
 		selection.
+	**same**
+		This option is deprecated. Use write_same instead.
+	**write_same_ndob**
+		Issue WRITE SAME(16) commands as above but with the No Data Output
+		Buffer (NDOB) bit set. No data will be transferred to the device with
+		this bit set. Data written will be a pre-determined pattern such as
+		all zeroes.
+	**write_stream**
+		Issue WRITE STREAM(16) commands. Use the **stream_id** option to specify
+		the stream identifier.
+	**verify_bytchk_00**
+		Issue VERIFY commands with BYTCHK set to 00. This directs the
+		device to carry out a medium verification with no data comparison.
+	**verify_bytchk_01**
+		Issue VERIFY commands with BYTCHK set to 01. This directs the device to
+		compare the data on the device with the data transferred to the device.
+	**verify_bytchk_11**
+		Issue VERIFY commands with BYTCHK set to 11. This transfers a
+		single block to the device and compares the contents of this block with the
+		data on the device beginning at the specified offset. fio's block size
+		parameter specifies the total amount of data compared with this command.
+		However, only one block (sector) worth of data is transferred to the device.
+		This is similar to the WRITE SAME command except that data is compared instead
+		of written.
+
+.. option:: stream_id=int : [sg]
+
+	Set the stream identifier for WRITE STREAM commands. If this is set to 0 (which is not
+	a valid stream identifier) fio will open a stream and then close it when done. Default
+	is 0.
 
 .. option:: hipri : [sg]
 
@@ -3629,6 +3680,19 @@ Measurements and reporting
 	If set, fio will log Unix timestamps to the log files produced by enabling
 	write_type_log for each log type, instead of the default zero-based
 	timestamps.
+
+.. option:: log_alternate_epoch=bool
+
+	If set, fio will log timestamps based on the epoch used by the clock specified
+	in the log_alternate_epoch_clock_id option, to the log files produced by
+	enabling write_type_log for each log type, instead of the default zero-based
+	timestamps.
+
+.. option:: log_alternate_epoch_clock_id=int
+
+	Specifies the clock_id to be used by clock_gettime to obtain the alternate epoch
+	if either log_unix_epoch or log_alternate_epoch are true. Otherwise has no
+	effect. Default value is 0, or CLOCK_REALTIME.
 
 .. option:: block_error_percentiles=bool
 
