@@ -97,6 +97,7 @@ enum {
 	__TD_F_MMAP_KEEP,
 	__TD_F_DIRS_CREATED,
 	__TD_F_CHECK_RATE,
+	__TD_F_SYNCS,
 	__TD_F_LAST,		/* not a real bit, keep last */
 };
 
@@ -118,6 +119,7 @@ enum {
 	TD_F_MMAP_KEEP		= 1U << __TD_F_MMAP_KEEP,
 	TD_F_DIRS_CREATED	= 1U << __TD_F_DIRS_CREATED,
 	TD_F_CHECK_RATE		= 1U << __TD_F_CHECK_RATE,
+	TD_F_SYNCS		= 1U << __TD_F_SYNCS,
 };
 
 enum {
@@ -182,7 +184,7 @@ struct zone_split_index {
  */
 struct thread_data {
 	struct flist_head opt_list;
-	unsigned long flags;
+	unsigned long long flags;
 	struct thread_options o;
 	void *eo;
 	pthread_t thread;
@@ -429,10 +431,12 @@ struct thread_data {
 	FILE *io_log_rfile;
 	unsigned int io_log_blktrace;
 	unsigned int io_log_blktrace_swap;
-	unsigned long long io_log_blktrace_last_ttime;
+	unsigned long long io_log_last_ttime;
+	struct timespec io_log_start_time;
 	unsigned int io_log_current;
 	unsigned int io_log_checkmark;
 	unsigned int io_log_highmark;
+	unsigned int io_log_version;
 	struct timespec io_log_highmark_time;
 
 	/*
@@ -678,13 +682,13 @@ enum {
 	TD_NR,
 };
 
-#define TD_ENG_FLAG_SHIFT	17
-#define TD_ENG_FLAG_MASK	((1U << 17) - 1)
+#define TD_ENG_FLAG_SHIFT	18
+#define TD_ENG_FLAG_MASK	((1ULL << 18) - 1)
 
 static inline void td_set_ioengine_flags(struct thread_data *td)
 {
 	td->flags = (~(TD_ENG_FLAG_MASK << TD_ENG_FLAG_SHIFT) & td->flags) |
-		    (td->io_ops->flags << TD_ENG_FLAG_SHIFT);
+		    ((unsigned long long)td->io_ops->flags << TD_ENG_FLAG_SHIFT);
 }
 
 static inline bool td_ioengine_flagged(struct thread_data *td,

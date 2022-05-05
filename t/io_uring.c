@@ -76,6 +76,7 @@ struct file {
 struct submitter {
 	pthread_t thread;
 	int ring_fd;
+	int enter_ring_fd;
 	int index;
 	struct io_sq_ring sq_ring;
 	struct io_uring_sqe *sqes;
@@ -127,6 +128,8 @@ static int stats = 0;		/* generate IO stats */
 static int aio = 0;		/* use libaio */
 static int runtime = 0;		/* runtime */
 static int random_io = 1;	/* random or sequential IO */
+static int register_ring = 1;	/* register ring */
+static int use_sync = 0;	/* use preadv2 */
 
 static unsigned long tsc_rate;
 
@@ -139,7 +142,7 @@ static float plist[] = { 1.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0,
 static int plist_len = 17;
 
 #ifndef IORING_REGISTER_MAP_BUFFERS
-#define IORING_REGISTER_MAP_BUFFERS	20
+#define IORING_REGISTER_MAP_BUFFERS	22
 struct io_uring_map_buffers {
 	__s32	fd;
 	__u32	buf_start;
@@ -349,10 +352,8 @@ static int io_uring_map_buffers(struct submitter *s)
 
 	if (do_nop)
 		return 0;
-	if (s->nr_files > 1) {
-		fprintf(stderr, "Can't map buffers with multiple files\n");
-		return -1;
-	}
+	if (s->nr_files > 1)
+		fprintf(stdout, "Mapping buffers may not work with multiple files\n");
 
 	return syscall(__NR_io_uring_register, s->ring_fd,
 			IORING_REGISTER_MAP_BUFFERS, &map, 1);
@@ -364,7 +365,7 @@ static int io_uring_register_buffers(struct submitter *s)
 		return 0;
 
 	return syscall(__NR_io_uring_register, s->ring_fd,
-			IORING_REGISTER_BUFFERS, s->iovecs, depth);
+			IORING_REGISTER_BUFFERS, s->iovecs, roundup_pow2(depth));
 }
 
 static int io_uring_register_files(struct submitter *s)
@@ -422,8 +423,15 @@ out:
 static int io_uring_enter(struct submitter *s, unsigned int to_submit,
 			  unsigned int min_complete, unsigned int flags)
 {
-	return syscall(__NR_io_uring_enter, s->ring_fd, to_submit, min_complete,
-			flags, NULL, 0);
+	if (register_ring)
+		flags |= IORING_ENTER_REGISTERED_RING;
+#ifdef FIO_ARCH_HAS_SYSCALL
+	return __do_syscall6(__NR_io_uring_enter, s->enter_ring_fd, to_submit,
+				min_complete, flags, NULL, 0);
+#else
+	return syscall(__NR_io_uring_enter, s->enter_ring_fd, to_submit,
+			min_complete, flags, NULL, 0);
+#endif
 }
 
 #ifndef CONFIG_HAVE_GETTID
@@ -790,6 +798,34 @@ static void *submitter_aio_fn(void *data)
 }
 #endif
 
+static void io_uring_unregister_ring(struct submitter *s)
+{
+	struct io_uring_rsrc_update up = {
+		.offset	= s->enter_ring_fd,
+	};
+
+	syscall(__NR_io_uring_register, s->ring_fd, IORING_UNREGISTER_RING_FDS,
+		&up, 1);
+}
+
+static int io_uring_register_ring(struct submitter *s)
+{
+	struct io_uring_rsrc_update up = {
+		.data	= s->ring_fd,
+		.offset	= -1U,
+	};
+	int ret;
+
+	ret = syscall(__NR_io_uring_register, s->ring_fd,
+			IORING_REGISTER_RING_FDS, &up, 1);
+	if (ret == 1) {
+		s->enter_ring_fd = up.offset;
+		return 0;
+	}
+	register_ring = 0;
+	return -1;
+}
+
 static void *submitter_uring_fn(void *data)
 {
 	struct submitter *s = data;
@@ -800,6 +836,9 @@ static void *submitter_uring_fn(void *data)
 #else
 	submitter_init(s);
 #endif
+
+	if (register_ring)
+		io_uring_register_ring(s);
 
 	prepped = 0;
 	do {
@@ -893,9 +932,86 @@ submit:
 		}
 	} while (!s->finish);
 
+	if (register_ring)
+		io_uring_unregister_ring(s);
+
 	finish = 1;
 	return NULL;
 }
+
+#ifdef CONFIG_PWRITEV2
+static void *submitter_sync_fn(void *data)
+{
+	struct submitter *s = data;
+	int ret;
+
+	submitter_init(s);
+
+	do {
+		uint64_t offset;
+		struct file *f;
+		long r;
+
+		if (s->nr_files == 1) {
+			f = &s->files[0];
+		} else {
+			f = &s->files[s->cur_file];
+			if (f->pending_ios >= file_depth(s)) {
+				s->cur_file++;
+				if (s->cur_file == s->nr_files)
+					s->cur_file = 0;
+				f = &s->files[s->cur_file];
+			}
+		}
+		f->pending_ios++;
+
+		if (random_io) {
+			r = __rand64(&s->rand_state);
+			offset = (r % (f->max_blocks - 1)) * bs;
+		} else {
+			offset = f->cur_off;
+			f->cur_off += bs;
+			if (f->cur_off + bs > f->max_size)
+				f->cur_off = 0;
+		}
+
+#ifdef ARCH_HAVE_CPU_CLOCK
+		if (stats)
+			s->clock_batch[s->clock_index] = get_cpu_clock();
+#endif
+
+		s->inflight++;
+		s->calls++;
+
+		if (polled)
+			ret = preadv2(f->real_fd, &s->iovecs[0], 1, offset, RWF_HIPRI);
+		else
+			ret = preadv2(f->real_fd, &s->iovecs[0], 1, offset, 0);
+
+		if (ret < 0) {
+			perror("preadv2");
+			break;
+		} else if (ret != bs) {
+			break;
+		}
+
+		s->done++;
+		s->inflight--;
+		f->pending_ios--;
+		if (stats)
+			add_stat(s, s->clock_index, 1);
+	} while (!s->finish);
+
+	finish = 1;
+	return NULL;
+}
+#else
+static void *submitter_sync_fn(void *data)
+{
+	finish = 1;
+	return NULL;
+}
+#endif
 
 static struct submitter *get_submitter(int offset)
 {
@@ -962,7 +1078,7 @@ static int setup_aio(struct submitter *s)
 		fixedbufs = register_files = 0;
 	}
 
-	return io_queue_init(depth, &s->aio_ctx);
+	return io_queue_init(roundup_pow2(depth), &s->aio_ctx);
 #else
 	fprintf(stderr, "Legacy AIO not available on this system/build\n");
 	errno = EINVAL;
@@ -995,7 +1111,7 @@ static int setup_ring(struct submitter *s)
 		perror("io_uring_setup");
 		return 1;
 	}
-	s->ring_fd = fd;
+	s->ring_fd = s->enter_ring_fd = fd;
 
 	io_uring_probe(fd);
 
@@ -1100,10 +1216,13 @@ static void usage(char *argv, int status)
 		" -T <int>  : TSC rate in HZ\n"
 		" -r <int>  : Runtime in seconds, default %s\n"
 		" -R <bool> : Use random IO, default %d\n"
-		" -a <bool> : Use legacy aio, default %d\n",
+		" -a <bool> : Use legacy aio, default %d\n"
+		" -S <bool> : Use sync IO (preadv2), default %d\n"
+		" -X <bool> : Use registered ring %d\n",
 		argv, DEPTH, BATCH_SUBMIT, BATCH_COMPLETE, BS, polled,
 		fixedbufs, dma_map, register_files, nthreads, !buffered, do_nop,
-		stats, runtime == 0 ? "unlimited" : runtime_str, random_io, aio);
+		stats, runtime == 0 ? "unlimited" : runtime_str, random_io, aio,
+		use_sync, register_ring);
 	exit(status);
 }
 
@@ -1156,6 +1275,7 @@ int main(int argc, char *argv[])
 	struct submitter *s;
 	unsigned long done, calls, reap;
 	int err, i, j, flags, fd, opt, threads_per_f, threads_rem = 0, nfiles;
+	long page_size;
 	struct file f;
 	char *fdepths;
 	void *ret;
@@ -1163,7 +1283,7 @@ int main(int argc, char *argv[])
 	if (!do_nop && argc < 2)
 		usage(argv[0], 1);
 
-	while ((opt = getopt(argc, argv, "d:s:c:b:p:B:F:n:N:O:t:T:a:r:D:R:h?")) != -1) {
+	while ((opt = getopt(argc, argv, "d:s:c:b:p:B:F:n:N:O:t:T:a:r:D:R:X:S:h?")) != -1) {
 		switch (opt) {
 		case 'a':
 			aio = !!atoi(optarg);
@@ -1230,6 +1350,17 @@ int main(int argc, char *argv[])
 		case 'R':
 			random_io = !!atoi(optarg);
 			break;
+		case 'X':
+			register_ring = !!atoi(optarg);
+			break;
+		case 'S':
+#ifdef CONFIG_PWRITEV2
+			use_sync = !!atoi(optarg);
+#else
+			fprintf(stderr, "preadv2 not supported\n");
+			exit(1);
+#endif
+			break;
 		case 'h':
 		case '?':
 		default:
@@ -1249,7 +1380,7 @@ int main(int argc, char *argv[])
 		dma_map = 0;
 
 	submitter = calloc(nthreads, sizeof(*submitter) +
-				depth * sizeof(struct iovec));
+				roundup_pow2(depth) * sizeof(struct iovec));
 	for (j = 0; j < nthreads; j++) {
 		s = get_submitter(j);
 		s->index = j;
@@ -1319,12 +1450,16 @@ int main(int argc, char *argv[])
 
 	arm_sig_int();
 
+	page_size = sysconf(_SC_PAGESIZE);
+	if (page_size < 0)
+		page_size = 4096;
+
 	for (j = 0; j < nthreads; j++) {
 		s = get_submitter(j);
-		for (i = 0; i < depth; i++) {
+		for (i = 0; i < roundup_pow2(depth); i++) {
 			void *buf;
 
-			if (posix_memalign(&buf, bs, bs)) {
+			if (posix_memalign(&buf, page_size, bs)) {
 				printf("failed alloc\n");
 				return 1;
 			}
@@ -1336,7 +1471,9 @@ int main(int argc, char *argv[])
 	for (j = 0; j < nthreads; j++) {
 		s = get_submitter(j);
 
-		if (!aio)
+		if (use_sync)
+			continue;
+		else if (!aio)
 			err = setup_ring(s);
 		else
 			err = setup_aio(s);
@@ -1347,14 +1484,18 @@ int main(int argc, char *argv[])
 	}
 	s = get_submitter(0);
 	printf("polled=%d, fixedbufs=%d/%d, register_files=%d, buffered=%d, QD=%d\n", polled, fixedbufs, dma_map, register_files, buffered, depth);
-	if (!aio)
+	if (use_sync)
+		printf("Engine=preadv2\n");
+	else if (!aio)
 		printf("Engine=io_uring, sq_ring=%d, cq_ring=%d\n", *s->sq_ring.ring_entries, *s->cq_ring.ring_entries);
 	else
 		printf("Engine=aio\n");
 
 	for (j = 0; j < nthreads; j++) {
 		s = get_submitter(j);
-		if (!aio)
+		if (use_sync)
+			pthread_create(&s->thread, NULL, submitter_sync_fn, s);
+		else if (!aio)
 			pthread_create(&s->thread, NULL, submitter_uring_fn, s);
 #ifdef CONFIG_LIBAIO
 		else

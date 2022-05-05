@@ -1541,7 +1541,7 @@ static int add_job(struct thread_data *td, const char *jobname, int job_add_num,
 	if (fixup_options(td))
 		goto err;
 
-	if (init_dedupe_working_set_seeds(td))
+	if (!td->o.dedupe_global && init_dedupe_working_set_seeds(td, 0))
 		goto err;
 
 	/*
@@ -2184,6 +2184,10 @@ static int __parse_jobs_ini(struct thread_data *td,
 		free(job_sections[i]);
 		i++;
 	}
+
+	free(job_sections);
+	job_sections = NULL;
+	nr_job_sections = 0;
 
 	free(opts);
 out:
@@ -2986,7 +2990,7 @@ int parse_cmd_line(int argc, char *argv[], int client_type)
 			log_err("%s: unrecognized option '%s'\n", argv[0],
 							argv[optind - 1]);
 			show_closest_option(argv[optind - 1]);
-			fallthrough;
+			fio_fallthrough;
 		default:
 			do_exit++;
 			exit_val = 1;

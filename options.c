@@ -1366,7 +1366,7 @@ int get_max_str_idx(char *input)
 }
 
 /*
- * Returns the directory at the index, indexes > entires will be
+ * Returns the directory at the index, indexes > entries will be
  * assigned via modulo division of the index
  */
 int set_name_idx(char *target, size_t tlen, char *input, int index,
@@ -1560,7 +1560,7 @@ static int str_gtod_reduce_cb(void *data, int *il)
 	int val = *il;
 
 	/*
-	 * Only modfiy options if gtod_reduce==1
+	 * Only modify options if gtod_reduce==1
 	 * Otherwise leave settings alone.
 	 */
 	if (val) {
@@ -4662,6 +4662,16 @@ struct fio_option fio_options[FIO_MAX_OPTS] = {
 		.minval	= 0,
 		.help	= "Percentage of buffers that are dedupable",
 		.interval = 1,
+		.category = FIO_OPT_C_IO,
+		.group	= FIO_OPT_G_IO_BUF,
+	},
+	{
+		.name	= "dedupe_global",
+		.lname	= "Global deduplication",
+		.type	= FIO_OPT_BOOL,
+		.off1	= offsetof(struct thread_options, dedupe_global),
+		.help	= "Share deduplication buffers across jobs",
+		.def	= "0",
 		.category = FIO_OPT_C_IO,
 		.group	= FIO_OPT_G_IO_BUF,
 	},

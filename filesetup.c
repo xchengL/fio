@@ -1486,7 +1486,7 @@ static bool init_rand_distribution(struct thread_data *td)
 
 /*
  * Check if the number of blocks exceeds the randomness capability of
- * the selected generator. Tausworthe is 32-bit, the others are fullly
+ * the selected generator. Tausworthe is 32-bit, the others are fully
  * 64-bit capable.
  */
 static int check_rand_gen_limits(struct thread_data *td, struct fio_file *f,
@@ -2031,11 +2031,12 @@ void dup_files(struct thread_data *td, struct thread_data *org)
 	if (!org->files)
 		return;
 
-	td->files = malloc(org->files_index * sizeof(f));
+	td->files = calloc(org->files_index, sizeof(f));
 
 	if (td->o.file_lock_mode != FILE_LOCK_NONE)
 		td->file_locks = malloc(org->files_index);
 
+	assert(org->files_index >= org->o.nr_files);
 	for_each_file(org, f, i) {
 		struct fio_file *__f;
 

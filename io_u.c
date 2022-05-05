@@ -355,7 +355,7 @@ static int get_next_seq_offset(struct thread_data *td, struct fio_file *f,
 	 * and invalidate the cache, if we need to.
 	 */
 	if (f->last_pos[ddir] >= f->io_size + get_start_offset(td, f) &&
-	    o->time_based) {
+	    o->time_based && o->nr_files == 1) {
 		f->last_pos[ddir] = f->file_offset;
 		loop_cache_invalidate(td, f);
 	}
@@ -993,7 +993,7 @@ static void __io_u_mark_map(uint64_t *map, unsigned int nr)
 		break;
 	case 1 ... 4:
 		idx = 1;
-		fallthrough;
+		fio_fallthrough;
 	case 0:
 		break;
 	}
@@ -1035,7 +1035,7 @@ void io_u_mark_depth(struct thread_data *td, unsigned int nr)
 		break;
 	case 2 ... 3:
 		idx = 1;
-		fallthrough;
+		fio_fallthrough;
 	case 1:
 		break;
 	}
@@ -1076,7 +1076,7 @@ static void io_u_mark_lat_nsec(struct thread_data *td, unsigned long long nsec)
 		break;
 	case 2 ... 3:
 		idx = 1;
-		fallthrough;
+		fio_fallthrough;
 	case 0 ... 1:
 		break;
 	}
@@ -1118,7 +1118,7 @@ static void io_u_mark_lat_usec(struct thread_data *td, unsigned long long usec)
 		break;
 	case 2 ... 3:
 		idx = 1;
-		fallthrough;
+		fio_fallthrough;
 	case 0 ... 1:
 		break;
 	}
@@ -1166,7 +1166,7 @@ static void io_u_mark_lat_msec(struct thread_data *td, unsigned long long msec)
 		break;
 	case 2 ... 3:
 		idx = 1;
-		fallthrough;
+		fio_fallthrough;
 	case 0 ... 1:
 		break;
 	}
@@ -2297,7 +2297,11 @@ int do_io_u_sync(const struct thread_data *td, struct io_u *io_u)
 	int ret;
 
 	if (io_u->ddir == DDIR_SYNC) {
+#ifdef CONFIG_FCNTL_SYNC
+		ret = fcntl(io_u->file->fd, F_FULLFSYNC);
+#else
 		ret = fsync(io_u->file->fd);
+#endif
 	} else if (io_u->ddir == DDIR_DATASYNC) {
 #ifdef CONFIG_FDATASYNC
 		ret = fdatasync(io_u->file->fd);

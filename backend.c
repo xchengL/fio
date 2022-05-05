@@ -2432,7 +2432,12 @@ reap:
 							strerror(ret));
 			} else {
 				pid_t pid;
+				struct fio_file **files;
+				void *eo;
 				dprint(FD_PROCESS, "will fork\n");
+				files = td->files;
+				eo = td->eo;
+				read_barrier();
 				pid = fork();
 				if (!pid) {
 					int ret;
@@ -2441,6 +2446,12 @@ reap:
 					_exit(ret);
 				} else if (i == fio_debug_jobno)
 					*fio_debug_jobp = pid;
+				// freeing previously allocated memory for files
+				// this memory freed MUST NOT be shared between processes, only the pointer itself may be shared within TD
+				free(files);
+				free(eo);
+				free(fd);
+				fd = NULL;
 			}
 			dprint(FD_MUTEX, "wait on startup_sem\n");
 			if (fio_sem_down_timeout(startup_sem, 10000)) {
@@ -2557,6 +2568,11 @@ int fio_backend(struct sk_out *sk_out)
 		setup_log(&agg_io_log[DDIR_READ], &p, "agg-read_bw.log");
 		setup_log(&agg_io_log[DDIR_WRITE], &p, "agg-write_bw.log");
 		setup_log(&agg_io_log[DDIR_TRIM], &p, "agg-trim_bw.log");
+	}
+
+	if (init_global_dedupe_working_set_seeds()) {
+		log_err("fio: failed to initialize global dedupe working set\n");
+		return 1;
 	}
 
 	startup_sem = fio_sem_init(FIO_SEM_LOCKED);

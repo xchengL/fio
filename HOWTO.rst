@@ -1443,7 +1443,7 @@ I/O type
 	range of possible random values.
 	Defaults are: random for **pareto** and **zipf**, and 0.5 for **normal**.
 	If you wanted to use **zipf** with a `theta` of 1.2 centered on 1/4 of allowed value range,
-	you would use ``random_distibution=zipf:1.2:0.25``.
+	you would use ``random_distribution=zipf:1.2:0.25``.
 
 	For a **zoned** distribution, fio supports specifying percentages of I/O
 	access that should fall within what range of the file or device. For
@@ -1748,6 +1748,12 @@ Buffers and memory
 
 	Note that size needs to be explicitly provided and only 1 file per
 	job is supported
+
+.. option:: dedupe_global=bool
+
+	This controls whether the deduplication buffers will be shared amongst
+	all jobs that have this option set. The buffers are spread evenly between
+	participating jobs.
 
 .. option:: invalidate=bool
 
@@ -3370,7 +3376,7 @@ Verification
 	To avoid false verification errors, do not use the norandommap option when
 	verifying data with async I/O engines and I/O depths > 1.  Or use the
 	norandommap and the lfsr random generator together to avoid writing to the
-	same offset with muliple outstanding I/Os.
+	same offset with multiple outstanding I/Os.
 
 .. option:: verify_offset=int
 
@@ -4398,7 +4404,9 @@ given in bytes. The `action` can be one of these:
 
 **wait**
 	   Wait for `offset` microseconds. Everything below 100 is discarded.
-	   The time is relative to the previous `wait` statement.
+	   The time is relative to the previous `wait` statement. Note that
+	   action `wait` is not allowed as of version 3, as the same behavior
+	   can be achieved using timestamps.
 **read**
 	   Read `length` bytes beginning from `offset`.
 **write**
@@ -4409,6 +4417,31 @@ given in bytes. The `action` can be one of these:
 	   :manpage:`fdatasync(2)` the file.
 **trim**
 	   Trim the given file from the given `offset` for `length` bytes.
+
+
+Trace file format v3
+~~~~~~~~~~~~~~~~~~~~
+
+The third version of the trace file format was added in fio version 3.31. It
+forces each action to have a timestamp associated with it.
+
+The first line of the trace file has to be::
+
+    fio version 3 iolog
+
+Following this can be lines in two different formats, which are described below.
+
+The file management format::
+
+    timestamp filename action
+
+The file I/O action format::
+
+    timestamp filename action offset length
+
+The `timestamp` is relative to the beginning of the run (ie starts at 0). The
+`filename`, `action`, `offset` and `length`  are identical to version 2, except
+that version 3 does not allow the `wait` action.
 
 
 I/O Replay - Merging Traces

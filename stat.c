@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <math.h>
@@ -377,7 +378,7 @@ void show_group_stats(struct group_run_stats *rs, struct buf_output *out)
 		free(maxalt);
 	}
 
-	/* Need to aggregate statisitics to show mixed values */
+	/* Need to aggregate statistics to show mixed values */
 	if (rs->unified_rw_rep == UNIFIED_BOTH)
 		show_mixed_group_stats(rs, out);
 }
@@ -1698,6 +1699,7 @@ static struct json_object *show_thread_status_json(struct thread_stat *ts,
 	if (je) {
 		json_object_add_value_int(root, "eta", je->eta_sec);
 		json_object_add_value_int(root, "elapsed", je->elapsed_sec);
+		free(je);
 	}
 
 	if (opt_list)
@@ -2731,6 +2733,9 @@ int __show_running_run_stats(void)
 	fio_gettime(&ts, NULL);
 
 	for_each_td(td, i) {
+		if (td->runstate >= TD_EXITED)
+			continue;
+
 		td->update_rusage = 1;
 		for_each_rw_ddir(ddir) {
 			td->ts.io_bytes[ddir] = td->io_bytes[ddir];
@@ -2759,6 +2764,9 @@ int __show_running_run_stats(void)
 	__show_run_stats();
 
 	for_each_td(td, i) {
+		if (td->runstate >= TD_EXITED)
+			continue;
+
 		if (td_read(td) && td->ts.io_bytes[DDIR_READ])
 			td->ts.runtime[DDIR_READ] -= rt[i];
 		if (td_write(td) && td->ts.io_bytes[DDIR_WRITE])
